@@ -1,0 +1,121 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model Tenant {
+  id           String         @id @default(cuid())
+  name         String
+  niche        String         @default("restaurant")
+  plan         String         @default("starter") // starter | pro | business
+  createdAt    DateTime       @default(now())
+  agents       Agent[]
+  contacts     Contact[]
+  conversations Conversation[]
+  channels     Channel[]
+}
+
+model Channel {
+  id        String   @id @default(cuid())
+  tenantId  String
+  type      String   // whatsapp | instagram | messenger | webchat
+  identifier String  // número de teléfono o handle
+  status    String   @default("disconnected") // connected | disconnected | connecting
+  metadata  String?  // JSON serializado (qr, sessionInfo, etc.)
+  createdAt DateTime @default(now())
+  tenant    Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  conversations Conversation[]
+
+  @@index([tenantId])
+}
+
+model Agent {
+  id        String   @id @default(cuid())
+  tenantId  String
+  name      String
+  email     String?
+  avatar    String?
+  role      String   @default("agent") // owner | agent
+  status    String   @default("offline") // online | offline | busy
+  specialty String?  // ej: "pedidos", "reservas", "quejas"
+  conversationsHandled Int @default(0)
+  avgResponseSec Int @default(120)
+  createdAt DateTime @default(now())
+  tenant    Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  conversations Conversation[]
+
+  @@index([tenantId])
+}
+
+model Contact {
+  id        String   @id @default(cuid())
+  tenantId  String
+  name      String
+  phone     String?
+  handle    String?
+  avatar    String?
+  tags      String   @default("[]") // JSON array
+  createdAt DateTime @default(now())
+  tenant    Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  conversations Conversation[]
+
+  @@index([tenantId])
+}
+
+model Conversation {
+  id          String   @id @default(cuid())
+  tenantId    String
+  channelId   String
+  contactId   String
+  agentId     String?
+  status      String   @default("open") // open | pending | closed | bot
+  intent      String?  // pedido | reserva | queja | consulta | venta
+  sentiment   String?  // positivo | neutro | negativo
+  priority    String   @default("normal") // baja | normal | alta | urgente
+  lastMessageAt DateTime @default(now())
+  unread      Int      @default(0)
+  isOpportunity Boolean @default(false)
+  opportunityValue Float? // valor estimado de la oportunidad en MXN
+  createdAt   DateTime @default(now())
+  tenant      Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  channel     Channel  @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  contact     Contact  @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  agent       Agent?   @relation(fields: [agentId], references: [id])
+  messages    Message[]
+
+  @@index([tenantId, lastMessageAt])
+  @@index([agentId])
+}
+
+model Message {
+  id             String   @id @default(cuid())
+  conversationId String
+  direction      String   // in | out
+  type           String   @default("text") // text | image | audio | video | document | location
+  content        String
+  mediaUrl       String?
+  transcription  String?  // para audios
+  sentiment      String?
+  intent         String?
+  fromAgentId    String?
+  externalId     String?  // id del mensaje en WhatsApp
+  createdAt      DateTime @default(now())
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  @@index([conversationId, createdAt])
+}
+
+model AnalyticsEvent {
+  id         String   @id @default(cuid())
+  tenantId   String
+  type       String   // missed_opportunity | resolved | converted | escalated
+  value      Float?
+  metadata   String?
+  createdAt  DateTime @default(now())
+
+  @@index([tenantId, createdAt])
+}
