@@ -353,15 +353,75 @@ async function ingestIncomingMessage(tenantId: string, msg: any) {
   });
 }
 
+export type SendResult = {
+  externalId: string;
+  jid: string;
+  phone: string;
+};
+
+/**
+ * Envía un mensaje de texto por WhatsApp.
+ *
+ * - Valida que la sesión esté conectada.
+ * - Normaliza el teléfono (solo dígitos) y lo verifica con `onWhatsApp()`
+ *   para evitar fallos silenciosos en números que no existen (ej. contactos demo).
+ * - Retorna el `externalId` del mensaje enviado para correlacionarlo con la BD.
+ *
+ * Lanza Error con mensaje legible si:
+ *   - WhatsApp no está conectado.
+ *   - El número no está registrado en WhatsApp.
+ *   - El socket rechaza el envío.
+ */
 export async function sendMessage(
   tenantId: string,
   toPhone: string,
   text: string
-) {
+): Promise<SendResult> {
   const state = clients.get(tenantId);
   if (!state?.socket || state.status !== "connected") {
-    throw new Error("WhatsApp no está conectado");
+    throw new Error("WhatsApp no está conectado. Escanea el QR en /dashboard/connect.");
   }
-  const jid = toPhone.includes("@") ? toPhone : `${toPhone}@s.whatsapp.net`;
-  await state.socket.sendMessage(jid, { text });
+
+  // Normalizamos: dejamos solo dígitos (Baileys quiere E.164 sin '+').
+  const normalized = String(toPhone).replace(/\D/g, "");
+  if (!normalized) {
+    throw new Error("Número de teléfono inválido (vacío tras normalizar).");
+  }
+
+  // Verificamos que el número exista realmente en WhatsApp.
+  // Esto evita el bug clásico de "no llegó nada" con números ficticios.
+  let onWaResult: Array<{ jid: string; exists: unknown }> | undefined;
+  try {
+    onWaResult = await state.socket.onWhatsApp(normalized);
+  } catch (err) {
+    console.warn(
+      `[baileys][${tenantId}] onWhatsApp falló (continuamos con best effort):`,
+      (err as Error).message
+    );
+  }
+
+  const verified = onWaResult?.[0];
+  if (onWaResult && (!verified || verified.exists !== true)) {
+    throw new Error(
+      `El número +${normalized} no está registrado en WhatsApp. ` +
+        `Asegúrate de usar un contacto real (los datos demo son ficticios).`
+    );
+  }
+
+  const jid = verified?.jid ?? `${normalized}@s.whatsapp.net`;
+
+  console.log(
+    `[baileys][${tenantId}] sendMessage → jid=${jid} (${text.length} chars)`
+  );
+
+  const result = await state.socket.sendMessage(jid, { text });
+  const externalId = result?.key?.id;
+
+  if (!externalId) {
+    throw new Error("Baileys no devolvió ID del mensaje (posible fallo de entrega).");
+  }
+
+  console.log(`[baileys][${tenantId}] mensaje enviado ok. id=${externalId}`);
+
+  return { externalId, jid, phone: normalized };
 }

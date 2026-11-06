@@ -20,7 +20,7 @@ export function Topbar({ title, subtitle }: { title: string; subtitle?: string }
   };
 
   return (
-    <header className="sticky top-0 z-20 flex h-16 items-center justify-between border-b bg-background/80 px-6 backdrop-blur">
+    <header className="sticky top-0 z-20 flex h-16 shrink-0 items-center justify-between border-b bg-background/80 px-6 backdrop-blur">
       <div>
         <h1 className="text-lg font-semibold leading-tight">{title}</h1>
         {subtitle && <p className="text-xs text-muted-foreground">{subtitle}</p>}
